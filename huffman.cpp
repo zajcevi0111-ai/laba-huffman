@@ -49,6 +49,34 @@ void ochistitPamyat(Uzel* uzel) {
     delete uzel;
 }
 
+// Изменение. Сохранение частоты вместо кода
+void saveChastoti(const map<char, int>& freq, ofstream& fout) {
+    int size = freq.size();
+    fout.write((char*)&size, sizeof(int));  // Количество символов
+
+    for (auto& p : freq) {
+        fout.put(p.first);                   // Символ
+        fout.write((char*)&p.second, sizeof(int));  // Частота
+    }
+}
+
+// Изменение. Будем теперь читать частоты из файла
+map<char, int> loadChastoti(ifstream& fin) {
+    map<char, int> freq;
+    int size;
+    fin.read((char*)&size, sizeof(int));
+
+    for (int i = 0; i < size; i++) {
+        char c;
+        int f;
+        fin.get(c);
+        fin.read((char*)&f, sizeof(int));
+        freq[c] = f;
+    }
+
+    return freq;
+}
+
 void kodirovatFile(string inputFile, string outputFile) {
     ifstream fin(inputFile);
     if (!fin) {
@@ -101,12 +129,13 @@ void kodirovatFile(string inputFile, string outputFile) {
         return;
     }
 
-    fout << "HUFFMAN" << endl;
+    // Изменение: Новый формат
+    fout << "HUFFMAN2" << endl;
     fout << text.length() << endl;
 
-    for (auto& para : kodirovki) {
-        fout << para.first << " " << para.second << endl;
-    }
+    // Изменение: Сохраняем частоты вместо кодов
+    saveChastoti(chastoty, fout);
+
     fout << "CODED" << endl;
 
     int bitCount = zakodirovanniyText.length();
@@ -143,8 +172,9 @@ void dekodirovatFile(string inputFile, string outputFile) {
 
     string magic;
     fin >> magic;
-    if (magic != "HUFFMAN") {
-        cout << "Oshibka: eto ne huffman-file!" << endl;
+
+    if (magic != "HUFFMAN2") {
+        cout << "Oshibka: eto ne huffman-file novogo formata!" << endl;
         return;
     }
 
@@ -152,61 +182,77 @@ void dekodirovatFile(string inputFile, string outputFile) {
     fin >> originalLength;
     fin.ignore();
 
-    kodirovki.clear();
-    dekodirovki.clear();
+    // Изменение: читаем таблицу частот
+    map<char, int> chastoty = loadChastoti(fin);
+
+    // Изменение: строим дерево Хаффмана из частот
+    priority_queue<Uzel*, vector<Uzel*>, Sravnenie> ochered;
+    for (auto& para : chastoty) {
+        ochered.push(new Uzel(para.first, para.second));
+    }
+    while (ochered.size() > 1) {
+        Uzel* levyj = ochered.top(); ochered.pop();
+        Uzel* pravyj = ochered.top(); ochered.pop();
+        ochered.push(new Uzel(levyj->chastota + pravyj->chastota, levyj, pravyj));
+    }
+    Uzel* koren = ochered.top();
 
     string line;
-    while (getline(fin, line) && line != "CODED") {
-        if (line.length() >= 3) {
-            char symbol = line[0];
-            string code = line.substr(2);
-            kodirovki[symbol] = code;
-            dekodirovki[code] = symbol;
-        }
-    }
+    getline(fin, line);
 
     int bitCount;
     fin >> bitCount;
     fin.ignore();
 
-    string zakodirovanniyBits = "";
-    char byte;
-    while (fin.get(byte)) {
-        bitset<8> bits(byte);
-        zakodirovanniyBits += bits.to_string();
-    }
-
-    zakodirovanniyBits = zakodirovanniyBits.substr(0, bitCount);
-
-    string decodedText = "";
-    string currentCode = "";
-
-    for (char bit : zakodirovanniyBits) {
-        currentCode += bit;
-        if (dekodirovki.find(currentCode) != dekodirovki.end()) {
-            decodedText += dekodirovki[currentCode];
-            currentCode = "";
-        }
-    }
-
-    decodedText = decodedText.substr(0, originalLength);
-
+    // Изменение. Декодируем напрямую из дерева
     ofstream fout(outputFile);
     if (!fout) {
         cout << "Oshibka: ne udalos sozdat fail " << outputFile << endl;
+        ochistitPamyat(koren);
         return;
     }
 
-    fout << decodedText;
+    Uzel* current = koren;
+    char byte;
+    int bitsProcessed = 0;
+    int charsDecoded = 0;
+
+    while (bitsProcessed < bitCount && fin.get(byte)) {
+        for (int i = 7; i >= 0 && bitsProcessed < bitCount; i--) {
+            bool bit = (byte >> i) & 1;
+
+            if (bit == 0) {
+                current = current->levyj;
+            }
+            else {
+                current = current->pravyj;
+            }
+
+            bitsProcessed++;
+
+            if (current->levyj == nullptr && current->pravyj == nullptr) {
+                fout.put(current->simvol);
+                charsDecoded++;
+                current = koren;
+
+                if (charsDecoded >= originalLength) {
+                    break;
+                }
+            }
+        }
+    }
+
     fout.close();
 
     cout << "Dekodirovanie vipolneno!" << endl;
     cout << "Rasshifrovannyy text sohranen v: " << outputFile << endl;
-    cout << "Proverka: " << (decodedText.length() == originalLength ? "OK" : "ERROR") << endl;
+    cout << "Proverka: " << (charsDecoded == originalLength ? "OK" : "ERROR") << endl;
+
+    ochistitPamyat(koren);
 }
 
 void pokazatMenu() {
-    cout << "    ALGORITM HAFMANA - LABORATORNAYA" << endl;
+    cout << "    ALGORITM HAFMANA - LABORATORNAYA (NOVYY FORMAT)" << endl;
     cout << "1. Kodirovat fail" << endl;
     cout << "2. Dekodirovat fail" << endl;
     cout << "3. Vihod" << endl;
